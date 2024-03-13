@@ -36,6 +36,7 @@ void interface_ioctl( FileDescriptor & fd, const unsigned long request,
     ifreq ifr;
     zero( ifr );
     strncpy( ifr.ifr_name, name.c_str(), IFNAMSIZ ); /* interface name */
+    ifr.ifr_name[sizeof(ifr.ifr_name)-1] = '\0';
 
     ifr_adjustment( ifr );
 

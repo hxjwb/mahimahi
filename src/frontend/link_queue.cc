@@ -103,11 +103,11 @@ LinkQueue::LinkQueue( const string & link_name, const string & filename, const s
     }
 }
 
-void LinkQueue::record_arrival( const uint64_t arrival_time, const size_t pkt_size )
+void LinkQueue::record_arrival( const uint64_t arrival_time, const size_t pkt_size, uint32_t ts)
 {
     /* log it */
     if ( log_ ) {
-        *log_ << arrival_time << " + " << pkt_size << endl;
+        *log_ << arrival_time << " + " << pkt_size << " " << ts << endl;
     }
 
     /* meter it */
@@ -116,11 +116,11 @@ void LinkQueue::record_arrival( const uint64_t arrival_time, const size_t pkt_si
     }
 }
 
-void LinkQueue::record_drop( const uint64_t time, const size_t pkts_dropped, const size_t bytes_dropped)
+void LinkQueue::record_drop( const uint64_t time, const size_t pkts_dropped, const size_t bytes_dropped, uint32_t ts)
 {
     /* log it */
     if ( log_ ) {
-        *log_ << time << " d " << pkts_dropped << " " << bytes_dropped << endl;
+        *log_ << time << " d " << pkts_dropped << " " << bytes_dropped << " " << ts << endl;
     }
 }
 
@@ -137,12 +137,12 @@ void LinkQueue::record_departure_opportunity( void )
     }    
 }
 
-void LinkQueue::record_departure( const uint64_t departure_time, const QueuedPacket & packet )
+void LinkQueue::record_departure( const uint64_t departure_time, const QueuedPacket & packet ,uint32_t ts)
 {
     /* log the delivery */
     if ( log_ ) {
         *log_ << departure_time << " - " << packet.contents.size()
-              << " " << departure_time - packet.arrival_time << endl;
+              << " " << departure_time - packet.arrival_time << " " << ts << endl;
     }
 
     /* meter the delivery */
@@ -155,8 +155,59 @@ void LinkQueue::record_departure( const uint64_t departure_time, const QueuedPac
     }    
 }
 
+// struct RTP_Header
+// {
+// 	uint32_t somehead;
+// 	uint32_t timestamp;
+// 	uint32_t ssrc;
+// }; // total 12 bytes
+
+// struct UDP_Header
+// {
+//     uint16_t src_port;
+//     uint16_t dst_port;
+//     uint16_t length;
+//     uint16_t checksum;
+// }; // total 8 bytes
+
+// struct IP_Header
+// {
+
+//     uint8_t version_ihl;
+//     uint8_t dscp_ecn;
+//     uint16_t total_length;
+//     uint16_t identification;
+//     uint16_t flags_fragment_offset;
+//     uint8_t ttl;
+//     uint8_t protocol;
+//     uint16_t checksum;
+//     uint32_t src_ip;
+//     uint32_t dst_ip;
+// }; // total 20 bytes
+
+struct Header // 0 0 8 0
+{
+    int bytes;
+    int IP[5]; 
+    int UDP[2];
+    int RTP[3];
+
+};
+
 void LinkQueue::read_packet( const string & contents )
 {
+
+
+    Header *header = (Header *)contents.c_str();
+
+    int ts = header->RTP[1];
+    uint32_t tss = ntohl(ts);
+
+    // // log
+    // if ( log_ ) {
+    //     *log_ << "ts " << tss << endl;
+    // }
+
     const uint64_t now = timestamp();
 
     if ( contents.size() > PACKET_SIZE ) {
@@ -165,7 +216,8 @@ void LinkQueue::read_packet( const string & contents )
 
     rationalize( now );
 
-    record_arrival( now, contents.size() );
+
+    record_arrival( now, contents.size(),tss );
 
     unsigned int bytes_before = packet_queue_->size_bytes();
     unsigned int packets_before = packet_queue_->size_packets();
@@ -178,7 +230,7 @@ void LinkQueue::read_packet( const string & contents )
     unsigned int missing_packets = packets_before + 1 - packet_queue_->size_packets();
     unsigned int missing_bytes = bytes_before + contents.size() - packet_queue_->size_bytes();
     if ( missing_packets > 0 || missing_bytes > 0 ) {
-        record_drop( now, missing_packets, missing_bytes );
+        record_drop( now, missing_packets, missing_bytes,tss );
     }
 }
 
@@ -243,7 +295,12 @@ void LinkQueue::rationalize( const uint64_t now )
 
             /* has the packet been fully sent? */
             if ( packet_in_transit_bytes_left_ == 0 ) {
-                record_departure( this_delivery_time, packet_in_transit_ );
+                const string content = packet_in_transit_.contents;
+                Header *header = (Header *)content.c_str();
+                int ts = header->RTP[1];
+                uint32_t tss = ntohl(ts);
+
+                record_departure( this_delivery_time, packet_in_transit_,tss);
 
                 /* this packet is ready to go */
                 output_queue_.push( move( packet_in_transit_.contents ) );
